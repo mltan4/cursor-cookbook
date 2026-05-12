@@ -1,7 +1,7 @@
 {
   "name": "agent-kanban",
   "version": "0.1.0",
-  "description": "A local kanban board for Cursor Cloud Agents built with the Cursor SDK.",
+  "description": "A local timeline activity view for Cursor Cloud Agents built with the Cursor SDK.",
   "private": true,
   "packageManager": "pnpm@10.9.0",
   "scripts": {

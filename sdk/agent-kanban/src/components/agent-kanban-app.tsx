@@ -54,6 +54,7 @@ import { cn } from "@/lib/utils"
 type IconComponent = React.ElementType
 
 type SidebarFilter = "all" | "withArtifacts" | "prAgents" | "recentlyActive"
+type ViewMode = "kanban" | "timeline"
 
 type AppStatus = "checking" | "onboarding" | "ready"
 
@@ -63,6 +64,20 @@ type ApiError = {
 }
 
 const sessionStorageKey = "agent-kanban-session-id"
+
+const statusBucketOrder = new Map([
+  ["Running", 0],
+  ["Queued", 1],
+  ["Pending", 2],
+  ["Completed", 3],
+  ["Complete", 3],
+  ["Done", 3],
+  ["Failed", 4],
+  ["Error", 4],
+  ["Cancelled", 5],
+  ["Archived", 6],
+  ["No status", 7],
+])
 
 const dateBucketOrder = new Map([
   ["Today", 0],
@@ -82,6 +97,17 @@ const sidebarFilters: {
   { id: "withArtifacts", label: "With artifacts", icon: ImageSquareIcon },
   { id: "prAgents", label: "PR agents", icon: GitBranchIcon },
   { id: "recentlyActive", label: "Recently active", icon: ClockIcon },
+]
+
+const boardLoadingColumns: {
+  id: string
+  title: string
+  icon: IconComponent
+  cards: number
+}[] = [
+  { id: "queued", title: "Queued", icon: CirclesFourIcon, cards: 3 },
+  { id: "running", title: "Running", icon: ClockIcon, cards: 2 },
+  { id: "review", title: "Review", icon: KanbanIcon, cards: 3 },
 ]
 
 const timelineLoadingSections: {
@@ -106,6 +132,7 @@ export function AgentKanbanApp() {
   const [agents, setAgents] = React.useState<AgentCard[]>([])
   const [repositories, setRepositories] = React.useState<RepositoryOption[]>([])
   const [models, setModels] = React.useState<ModelOption[]>([])
+  const [viewMode, setViewMode] = React.useState<ViewMode>("timeline")
   const [sidebarFilter, setSidebarFilter] = React.useState<SidebarFilter>("all")
   const [query, setQuery] = React.useState("")
   const [isLoading, setIsLoading] = React.useState(false)
@@ -209,7 +236,8 @@ export function AgentKanbanApp() {
   const searchedAgents = searchAgents(agents, query)
   const visibleAgents = filterAgentsBySidebar(searchedAgents, sidebarFilter)
   const timelineGroups = groupAgentsByActivity(visibleAgents)
-  const showTimelineLoading = isLoading && agents.length === 0 && visibleAgents.length === 0
+  const kanbanGroups = groupAgentsByStatus(visibleAgents)
+  const showInitialLoading = isLoading && agents.length === 0 && visibleAgents.length === 0
   const sidebarItems = sidebarFilters.map((item) => ({
     ...item,
     count: filterAgentsBySidebar(searchedAgents, item.id).length,
@@ -250,7 +278,7 @@ export function AgentKanbanApp() {
                 <ClockIcon aria-hidden="true" className="size-4" />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold">Agent Timeline</div>
+                <div className="truncate text-sm font-semibold">Agent Views</div>
                 <div className="truncate text-xs text-muted-foreground">
                   Cursor Cloud Agents
                 </div>
@@ -340,6 +368,8 @@ export function AgentKanbanApp() {
             />
           </div>
 
+          <ViewModeToggle value={viewMode} onChange={setViewMode} />
+
           <div className="hidden shrink-0 items-center gap-2 text-xs text-muted-foreground xl:flex">
             <span>{visibleAgents.length} shown</span>
             {isLoading ? (
@@ -374,20 +404,37 @@ export function AgentKanbanApp() {
 
         <section className="flex min-h-0 flex-1 flex-col">
           <ScrollArea className="min-h-0 flex-1">
-            <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col gap-4 p-4">
-              {timelineGroups.length > 0 ? (
-                <>
-                  <TimelineHeader agentCount={visibleAgents.length} isLoading={isLoading} />
-                  <div className="flex flex-col gap-6">
-                    {timelineGroups.map((group) => (
-                      <TimelineSection key={group.id} title={group.title} agents={group.agents} />
-                    ))}
-                  </div>
-                </>
-              ) : showTimelineLoading ? (
-                <TimelineLoadingSkeleton />
+            <div
+              className={cn(
+                "flex min-h-full w-full flex-col gap-4 p-4",
+                viewMode === "timeline" && "mx-auto max-w-5xl"
+              )}
+            >
+              {visibleAgents.length > 0 ? (
+                viewMode === "timeline" ? (
+                  <>
+                    <TimelineHeader agentCount={visibleAgents.length} isLoading={isLoading} />
+                    <div className="flex flex-col gap-6">
+                      {timelineGroups.map((group) => (
+                        <TimelineSection
+                          key={group.id}
+                          title={group.title}
+                          agents={group.agents}
+                        />
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <KanbanBoard
+                    groups={kanbanGroups}
+                    agentCount={visibleAgents.length}
+                    isLoading={isLoading}
+                  />
+                )
+              ) : showInitialLoading ? (
+                viewMode === "timeline" ? <TimelineLoadingSkeleton /> : <BoardLoadingSkeleton />
               ) : (
-                <EmptyTimeline onCreate={() => setIsCreateOpen(true)} />
+                <EmptyAgents viewMode={viewMode} onCreate={() => setIsCreateOpen(true)} />
               )}
             </div>
           </ScrollArea>
@@ -412,7 +459,7 @@ function LoadingScreen() {
     <div className="flex min-h-screen items-center justify-center bg-background">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Loading Agent Timeline</CardTitle>
+          <CardTitle>Loading Agent Views</CardTitle>
           <CardDescription>Checking for a saved Cursor API key.</CardDescription>
         </CardHeader>
       </Card>
@@ -504,6 +551,230 @@ function OnboardingScreen({
           </a>
         </CardFooter>
       </Card>
+    </div>
+  )
+}
+
+function ViewModeToggle({
+  value,
+  onChange,
+}: {
+  value: ViewMode
+  onChange: (value: ViewMode) => void
+}) {
+  return (
+    <div
+      className="flex shrink-0 rounded-lg border bg-muted/40 p-0.5"
+      aria-label="Switch agent view"
+    >
+      <button
+        type="button"
+        aria-pressed={value === "kanban"}
+        onClick={() => onChange("kanban")}
+        className={cn(
+          "inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+          value === "kanban" && "bg-background text-foreground shadow-sm"
+        )}
+      >
+        <KanbanIcon aria-hidden="true" className="size-3.5" />
+        <span className="hidden sm:inline">Kanban</span>
+      </button>
+      <button
+        type="button"
+        aria-pressed={value === "timeline"}
+        onClick={() => onChange("timeline")}
+        className={cn(
+          "inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+          value === "timeline" && "bg-background text-foreground shadow-sm"
+        )}
+      >
+        <ClockIcon aria-hidden="true" className="size-3.5" />
+        <span className="hidden sm:inline">Timeline</span>
+      </button>
+    </div>
+  )
+}
+
+function KanbanBoard({
+  groups,
+  agentCount,
+  isLoading,
+}: {
+  groups: ReturnType<typeof groupAgentsByStatus>
+  agentCount: number
+  isLoading: boolean
+}) {
+  return (
+    <>
+      <BoardHeader agentCount={agentCount} isLoading={isLoading} />
+      <div className="flex min-h-full gap-3">
+        {groups.map((group) => (
+          <BoardColumn key={group.id} title={group.title} agents={group.agents} />
+        ))}
+      </div>
+    </>
+  )
+}
+
+function BoardHeader({
+  agentCount,
+  isLoading,
+}: {
+  agentCount: number
+  isLoading: boolean
+}) {
+  return (
+    <Card className="bg-card/70">
+      <CardHeader className="flex-row items-start justify-between gap-4">
+        <div className="min-w-0">
+          <CardTitle>Cloud agent board</CardTitle>
+          <CardDescription>
+            A Kanban view of Cursor Cloud Agents grouped by lifecycle status.
+          </CardDescription>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Badge variant="secondary">{agentCount} shown</Badge>
+          {isLoading ? <Badge variant="outline">Syncing</Badge> : null}
+        </div>
+      </CardHeader>
+    </Card>
+  )
+}
+
+function BoardColumn({
+  title,
+  agents,
+}: {
+  title: string
+  agents: AgentCard[]
+}) {
+  return (
+    <section className="flex w-80 shrink-0 flex-col rounded-xl bg-muted/20">
+      <header className="flex items-center justify-between px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <CirclesFourIcon
+            aria-hidden="true"
+            className="size-3.5 shrink-0 text-muted-foreground"
+          />
+          <h2 className="truncate text-sm font-medium">{title}</h2>
+        </div>
+        <Badge variant="secondary">{agents.length}</Badge>
+      </header>
+      <div className="flex flex-col gap-2 p-2">
+        {agents.map((agent) => (
+          <AgentCardPreview key={agent.id} agent={agent} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function BoardLoadingSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label="Loading cloud agents"
+      className="flex min-h-[60vh] flex-1 gap-3"
+    >
+      <span className="sr-only">Loading cloud agents</span>
+      {boardLoadingColumns.map((column) => {
+        const Icon = column.icon
+
+        return (
+          <section
+            key={column.id}
+            className="flex w-80 shrink-0 flex-col rounded-xl border bg-muted/20 shadow-sm"
+          >
+            <header className="flex items-center justify-between px-3 py-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="flex size-5 items-center justify-center rounded-md bg-background/70 text-muted-foreground">
+                  <Icon aria-hidden="true" className="size-3.5" />
+                </span>
+                <div
+                  className="h-3 w-20 animate-pulse rounded-full bg-muted"
+                  aria-hidden="true"
+                />
+              </div>
+              <div
+                className="h-5 w-8 animate-pulse rounded-full bg-background/80 ring-1 ring-border/60"
+                aria-hidden="true"
+              />
+            </header>
+            <div className="flex flex-col gap-2 p-2">
+              {Array.from({ length: column.cards }).map((_, cardIndex) => {
+                const [titleWidth, metaWidth] =
+                  loadingCardLineWidths[cardIndex % loadingCardLineWidths.length]
+
+                return (
+                  <Card
+                    key={`${column.id}-${cardIndex}`}
+                    size="sm"
+                    className="gap-3 bg-card/70 ring-border/60"
+                  >
+                    <CardHeader className="gap-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 flex-1 flex-col gap-2">
+                          <div
+                            className={cn(
+                              "h-3 animate-pulse rounded-full bg-muted",
+                              titleWidth
+                            )}
+                            aria-hidden="true"
+                          />
+                          <div
+                            className="h-3 w-7/12 animate-pulse rounded-full bg-muted/70"
+                            aria-hidden="true"
+                          />
+                        </div>
+                        <div
+                          className="h-5 w-16 animate-pulse rounded-full bg-muted/80"
+                          aria-hidden="true"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <div
+                          className="size-3.5 animate-pulse rounded-full bg-muted"
+                          aria-hidden="true"
+                        />
+                        <div
+                          className={cn(
+                            "h-2.5 animate-pulse rounded-full bg-muted",
+                            metaWidth
+                          )}
+                          aria-hidden="true"
+                        />
+                      </div>
+                    </CardHeader>
+                    {cardIndex === 0 ? (
+                      <CardContent className="flex flex-col gap-2">
+                        <div
+                          className="h-2.5 w-full animate-pulse rounded-full bg-muted/70"
+                          aria-hidden="true"
+                        />
+                        <div
+                          className="h-2.5 w-9/12 animate-pulse rounded-full bg-muted/60"
+                          aria-hidden="true"
+                        />
+                      </CardContent>
+                    ) : null}
+                    <CardFooter className="flex-wrap justify-between gap-2 border-t-0 bg-transparent">
+                      <div
+                        className="h-2.5 w-12 animate-pulse rounded-full bg-muted"
+                        aria-hidden="true"
+                      />
+                      <div
+                        className="h-2.5 w-8 animate-pulse rounded-full bg-muted/70"
+                        aria-hidden="true"
+                      />
+                    </CardFooter>
+                  </Card>
+                )
+              })}
+            </div>
+          </section>
+        )
+      })}
     </div>
   )
 }
@@ -751,6 +1022,61 @@ function TimelineActivityItem({ agent }: { agent: AgentCard }) {
         </CardFooter>
       </Card>
     </article>
+  )
+}
+
+function AgentCardPreview({ agent }: { agent: AgentCard }) {
+  const previewArtifact = getPreviewArtifact(agent.artifacts)
+  const hasCardContent = Boolean(agent.latestMessage || previewArtifact)
+
+  return (
+    <Card
+      size="sm"
+      className="gap-3 bg-card/70 ring-border/60 transition-colors hover:bg-card/90"
+    >
+      <CardHeader className="gap-2">
+        <div className="flex items-start justify-between gap-3">
+          <CardTitle className="line-clamp-2">{agent.title}</CardTitle>
+          <StatusBadge status={agent.status} />
+        </div>
+        <CardDescription className="flex flex-col gap-1 text-xs">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <KanbanIcon aria-hidden="true" className="size-3.5 shrink-0" />
+            <span className="truncate">{agent.repository}</span>
+          </span>
+          {agent.branch ? (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0" />
+              <span className="truncate">{agent.branch}</span>
+            </span>
+          ) : null}
+        </CardDescription>
+      </CardHeader>
+      {hasCardContent ? (
+        <CardContent className="flex flex-col gap-3">
+          {agent.latestMessage ? (
+            <p className="line-clamp-2 text-sm text-muted-foreground">
+              {agent.latestMessage}
+            </p>
+          ) : null}
+          {previewArtifact ? <ArtifactTile artifact={previewArtifact} /> : null}
+        </CardContent>
+      ) : null}
+      <CardFooter className="flex-wrap justify-between gap-2 border-t-0 bg-transparent text-xs text-muted-foreground">
+        <span>{formatRelativeTime(getActivityTime(agent))}</span>
+        {agent.durationMs ? <span>{formatDuration(agent.durationMs)}</span> : null}
+        {agent.prUrl ? (
+          <a
+            href={agent.prUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-foreground underline-offset-4 hover:underline"
+          >
+            PR
+          </a>
+        ) : null}
+      </CardFooter>
+    </Card>
   )
 }
 
@@ -1066,14 +1392,22 @@ function SidebarItem({
   )
 }
 
-function EmptyTimeline({ onCreate }: { onCreate: () => void }) {
+function EmptyAgents({
+  viewMode,
+  onCreate,
+}: {
+  viewMode: ViewMode
+  onCreate: () => void
+}) {
+  const surface = viewMode === "timeline" ? "timeline" : "board"
+
   return (
     <div className="flex min-h-[50vh] flex-1 items-center justify-center">
       <Card className="w-full max-w-md text-center">
         <CardHeader>
           <CardTitle>No agents found</CardTitle>
           <CardDescription>
-            Create a cloud agent or adjust your search to populate the timeline.
+            Create a cloud agent or adjust your search to populate the {surface}.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1099,6 +1433,32 @@ function StatusBadge({ status }: { status: string }) {
         : "outline"
 
   return <Badge variant={variant}>{formatStatusLabel(status)}</Badge>
+}
+
+function groupAgentsByStatus(agents: AgentCard[]) {
+  const sortedAgents = [...agents].sort(
+    (left, right) => getActivityTimestamp(right) - getActivityTimestamp(left)
+  )
+  const groups = new Map<string, AgentCard[]>()
+
+  for (const agent of sortedAgents) {
+    const title = formatStatusLabel(agent.status)
+    const group = groups.get(title) ?? []
+    group.push(agent)
+    groups.set(title, group)
+  }
+
+  return Array.from(groups.entries())
+    .sort(
+      ([leftTitle], [rightTitle]) =>
+        statusBucketRank(leftTitle) - statusBucketRank(rightTitle) ||
+        leftTitle.localeCompare(rightTitle)
+    )
+    .map(([title, group]) => ({
+      id: `status-${title}`,
+      title,
+      agents: group,
+    }))
 }
 
 function groupAgentsByActivity(agents: AgentCard[]) {
@@ -1139,6 +1499,10 @@ function getActivityTimestamp(agent: AgentCard) {
 
 function dateBucketRank(title: string) {
   return dateBucketOrder.get(title) ?? dateBucketOrder.size
+}
+
+function statusBucketRank(title: string) {
+  return statusBucketOrder.get(title) ?? statusBucketOrder.size
 }
 
 function searchAgents(agents: AgentCard[], query: string) {

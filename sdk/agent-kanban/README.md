@@ -1,15 +1,17 @@
-# Cursor SDK Agent Timeline
+# Cursor SDK Agent Views
 
-A timeline-style activity view for Cursor Cloud Agents. It uses the Cursor SDK
-to list cloud agents, bucket them by recent activity, preview artifacts on
-timeline cards, and create new cloud agents from a repository and prompt.
+Kanban and timeline views for Cursor Cloud Agents. It uses the Cursor SDK to
+list cloud agents, switch between status columns and recent-activity buckets,
+preview artifacts on agent cards, and create new cloud agents from a repository
+and prompt.
 
 This example demonstrates:
 
 - required API-key onboarding before any Cloud Agent data loads,
-- cloud-agent listing sorted by latest activity and grouped into date buckets,
-- timeline cards with status, repo/branch metadata, latest activity, PR/repo
-  links, and artifact previews,
+- a view toggle for switching between Kanban columns and timeline activity,
+- cloud-agent listing sorted by latest activity or grouped by lifecycle status,
+- agent cards with status, repo/branch metadata, latest activity, PR/repo links,
+  and artifact previews,
 - create-agent flows backed by `Agent.create({ cloud: { repos } })`,
 - authenticated artifact media previews proxied through local API routes.
 
@@ -30,4 +32,4 @@ session.
 
 Repository listing is rate-limited by the Cloud Agents API and is cached briefly
 in memory. Artifact previews are fetched through authenticated local API routes,
-so refresh the timeline if a preview stops loading.
+so refresh the current view if a preview stops loading.

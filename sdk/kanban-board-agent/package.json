@@ -1,0 +1,28 @@
+{
+  "name": "kanban-board-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cursor SDK agent that scaffolds a local Kanban board app.",
+  "packageManager": "pnpm@10.9.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "kanban-board-agent": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@cursor/sdk": "^1.0.13"
+  },
+  "devDependencies": {
+    "@types/node": "^25.7.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}

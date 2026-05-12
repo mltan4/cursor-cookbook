@@ -16,6 +16,10 @@ A minimal Node.js example that creates a local agent, sends one prompt, and stre
 
 A web app for spinning up agents to scaffold new projects and iterate on ideas in a sandboxed cloud environment.
 
+### [Kanban board builder agent](sdk/kanban-board-agent)
+
+A focused CLI agent that uses the Cursor SDK to scaffold a Vite/React Kanban board app in a target workspace.
+
 ### [Kanban board](sdk/agent-kanban)
 
 A kanban board for viewing Cursor Cloud Agents, grouping them by status or repository, previewing artifacts, and creating new cloud agents from a repository and prompt.

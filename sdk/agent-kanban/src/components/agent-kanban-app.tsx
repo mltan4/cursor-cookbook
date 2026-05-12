@@ -51,7 +51,7 @@ import type {
 } from "@/lib/agents/types"
 import { cn } from "@/lib/utils"
 
-type GroupBy = "status" | "repository" | "createdAt"
+type GroupBy = "status" | "repository" | "branch" | "createdAt"
 type IconComponent = React.ElementType
 
 type GroupOption = {
@@ -80,6 +80,7 @@ const defaultGroupBy: GroupBy = "status"
 const groupOptions: GroupOption[] = [
   { id: "status", label: "Status", icon: CirclesFourIcon },
   { id: "repository", label: "Repository", icon: KanbanIcon },
+  { id: "branch", label: "Branch", icon: GitBranchIcon, requiresData: "branch" },
   { id: "createdAt", label: "Created date", icon: ClockIcon },
 ]
 
@@ -847,12 +848,16 @@ function CreateAgentDialog({
   const [name, setName] = React.useState("")
   const [prompt, setPrompt] = React.useState("")
   const [repositoryId, setRepositoryId] = React.useState(repositories[0]?.id ?? "")
+  const [repositoryUrl, setRepositoryUrl] = React.useState("")
   const [modelId, setModelId] = React.useState(models[0]?.id ?? "")
   const [branch, setBranch] = React.useState("")
   const [autoCreatePR, setAutoCreatePR] = React.useState(true)
   const [isSubmitting, setIsSubmitting] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  const selectedRepositoryId = repositoryId || repositories[0]?.id || ""
+  const hasRepositories = repositories.length > 0
+  const selectedRepositoryId = hasRepositories
+    ? repositoryId || repositories[0]?.id || ""
+    : repositoryUrl.trim()
   const hasModels = models.length > 0
   const selectedModelId = modelId || models[0]?.id || ""
 
@@ -915,34 +920,46 @@ function CreateAgentDialog({
             </label>
 
             <div className={cn("grid gap-4", hasModels && "md:grid-cols-2")}>
-              <label className="flex flex-col gap-2 text-sm font-medium">
-                Repository
-                <Select
-                  items={repositories.map((repository) => ({
-                    label: repository.label,
-                    value: repository.id,
-                  }))}
-                  value={selectedRepositoryId}
-                  onValueChange={(value) => {
-                    if (value) {
-                      setRepositoryId(value)
-                    }
-                  }}
-                >
-                  <SelectTrigger aria-label="Repository" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent align="start">
-                    <SelectGroup>
-                      {repositories.map((repository) => (
-                        <SelectItem key={repository.id} value={repository.id}>
-                          {repository.label}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </label>
+              {hasRepositories ? (
+                <label className="flex flex-col gap-2 text-sm font-medium">
+                  Repository
+                  <Select
+                    items={repositories.map((repository) => ({
+                      label: repository.label,
+                      value: repository.id,
+                    }))}
+                    value={selectedRepositoryId}
+                    onValueChange={(value) => {
+                      if (value) {
+                        setRepositoryId(value)
+                      }
+                    }}
+                  >
+                    <SelectTrigger aria-label="Repository" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent align="start">
+                      <SelectGroup>
+                        {repositories.map((repository) => (
+                          <SelectItem key={repository.id} value={repository.id}>
+                            {repository.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </label>
+              ) : (
+                <label className="flex flex-col gap-2 text-sm font-medium">
+                  Repository URL
+                  <Input
+                    value={repositoryUrl}
+                    onChange={(event) => setRepositoryUrl(event.target.value)}
+                    placeholder="https://github.com/owner/repo"
+                    required
+                  />
+                </label>
+              )}
 
               {hasModels ? (
                 <label className="flex flex-col gap-2 text-sm font-medium">
@@ -1008,8 +1025,8 @@ function CreateAgentDialog({
 
             {repositories.length === 0 ? (
               <div className="rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-                No repositories were returned by the SDK. Check your Cursor and
-                GitHub integration permissions.
+                No repositories were returned by the SDK. Paste a GitHub repository
+                URL or check your Cursor and GitHub integration permissions.
               </div>
             ) : null}
 

@@ -8,7 +8,7 @@ and prompt.
 This example demonstrates:
 
 - required API-key onboarding before any Cloud Agent data loads,
-- a view toggle for switching between Kanban columns and timeline activity,
+- a view dropdown filter for switching between Kanban columns and timeline activity,
 - cloud-agent listing sorted by latest activity or grouped by lifecycle status,
 - agent cards with status, repo/branch metadata, latest activity, PR/repo links,
   and artifact previews,

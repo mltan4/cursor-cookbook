@@ -496,12 +496,12 @@ async function getCurrentUser(apiKey: string): Promise<PublicUser | null> {
   try {
     const user = asRecord(await Cursor.me({ apiKey }))
     const name =
-      firstString(user, ["name", "displayName", "username"]) ??
-      firstString(user, ["email"]) ??
+      firstString(user, ["name", "displayName", "username", "apiKeyName"]) ??
+      firstString(user, ["email", "userEmail"]) ??
       "Cursor user"
     return {
       name,
-      email: firstString(user, ["email"]),
+      email: firstString(user, ["email", "userEmail"]),
     }
   } catch {
     return null
@@ -521,7 +521,7 @@ async function resolveRepository(
     return selected
   }
 
-  const fallbackUrl = normalizeRepositoryUrl(repositoryId)
+  const fallbackUrl = normalizeRepositoryListUrl(repositoryId)
   if (fallbackUrl) {
     return {
       id: fallbackUrl,
@@ -751,17 +751,25 @@ function normalizeModel(rawModel: unknown): ModelOption | null {
 
 function normalizeRepository(rawRepository: unknown): RepositoryOption | null {
   const record = asRecord(rawRepository)
+  const rawOwner = firstString(record, ["owner"])
+  const rawName = firstString(record, ["name"])
+  const repositoryPath =
+    normalizeRepositoryPath(firstString(record, ["repository", "fullName", "slug"])) ??
+    normalizeRepositoryPath(rawOwner && rawName ? `${rawOwner}/${rawName}` : undefined)
   const url =
     normalizeRepositoryUrl(firstString(record, ["url", "htmlUrl", "remoteUrl"])) ??
-    normalizeRepositoryUrl(firstString(record, ["cloneUrl", "sshUrl"]))
+    normalizeRepositoryUrl(firstString(record, ["cloneUrl", "sshUrl"])) ??
+    (repositoryPath ? `https://github.com/${repositoryPath}` : undefined)
   if (!url) {
     return null
   }
 
   const label =
-    firstString(record, ["fullName", "slug", "label", "name"]) ??
+    firstString(record, ["fullName", "slug", "label"]) ??
+    repositoryPath ??
+    rawName ??
     labelFromRepositoryUrl(url)
-  const [owner, name] = label.includes("/")
+  const [labelOwner, labelName] = label.includes("/")
     ? label.split("/", 2)
     : labelFromRepositoryUrl(url).split("/", 2)
 
@@ -769,8 +777,8 @@ function normalizeRepository(rawRepository: unknown): RepositoryOption | null {
     id: firstString(record, ["id"]) ?? url,
     label,
     url,
-    owner,
-    name,
+    owner: rawOwner ?? labelOwner,
+    name: rawName ?? labelName,
     defaultBranch: firstString(record, [
       "defaultBranch",
       "default_branch",
@@ -885,6 +893,21 @@ function normalizeRepositoryUrl(value: string | undefined): string | undefined {
   const httpsMatch = trimmed.match(/^https:\/\/github\.com\/(.+\/.+)$/)
   const repoPath = sshMatch?.[1] ?? sshUrlMatch?.[1] ?? httpsMatch?.[1]
   return repoPath ? `https://github.com/${repoPath}` : undefined
+}
+
+function normalizeRepositoryPath(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined
+  }
+
+  const normalizedUrl = normalizeRepositoryListUrl(value)
+  if (normalizedUrl) {
+    return labelFromRepositoryUrl(normalizedUrl)
+  }
+
+  const trimmed = value.trim().replace(/\.git$/, "")
+  const pathMatch = trimmed.match(/^([^/\s]+)\/([^/\s]+)$/)
+  return pathMatch ? `${pathMatch[1]}/${pathMatch[2]}` : undefined
 }
 
 function normalizeRepositoryListUrl(value: string | undefined): string | undefined {

@@ -51,21 +51,10 @@ import type {
 } from "@/lib/agents/types"
 import { cn } from "@/lib/utils"
 
-type GroupBy = "status" | "repository" | "createdAt"
 type IconComponent = React.ElementType
 
-type GroupOption = {
-  id: GroupBy
-  label: string
-  icon: IconComponent
-  requiresData?: keyof AgentCard
-}
-
-type SelectableGroupOption = GroupOption & {
-  selectable: boolean
-}
-
 type SidebarFilter = "all" | "withArtifacts" | "prAgents" | "recentlyActive"
+type ViewMode = "kanban" | "timeline"
 
 type AppStatus = "checking" | "onboarding" | "ready"
 
@@ -75,13 +64,20 @@ type ApiError = {
 }
 
 const sessionStorageKey = "agent-kanban-session-id"
-const defaultGroupBy: GroupBy = "status"
 
-const groupOptions: GroupOption[] = [
-  { id: "status", label: "Status", icon: CirclesFourIcon },
-  { id: "repository", label: "Repository", icon: KanbanIcon },
-  { id: "createdAt", label: "Created date", icon: ClockIcon },
-]
+const statusBucketOrder = new Map([
+  ["Running", 0],
+  ["Queued", 1],
+  ["Pending", 2],
+  ["Completed", 3],
+  ["Complete", 3],
+  ["Done", 3],
+  ["Failed", 4],
+  ["Error", 4],
+  ["Cancelled", 5],
+  ["Archived", 6],
+  ["No status", 7],
+])
 
 const dateBucketOrder = new Map([
   ["Today", 0],
@@ -114,6 +110,16 @@ const boardLoadingColumns: {
   { id: "review", title: "Review", icon: KanbanIcon, cards: 3 },
 ]
 
+const timelineLoadingSections: {
+  id: string
+  title: string
+  cards: number
+}[] = [
+  { id: "today", title: "Today", cards: 3 },
+  { id: "yesterday", title: "Yesterday", cards: 2 },
+  { id: "older", title: "Earlier", cards: 2 },
+]
+
 const loadingCardLineWidths = [
   ["w-11/12", "w-2/3"],
   ["w-4/5", "w-1/2"],
@@ -126,7 +132,7 @@ export function AgentKanbanApp() {
   const [agents, setAgents] = React.useState<AgentCard[]>([])
   const [repositories, setRepositories] = React.useState<RepositoryOption[]>([])
   const [models, setModels] = React.useState<ModelOption[]>([])
-  const [groupBy, setGroupBy] = React.useState<GroupBy>(defaultGroupBy)
+  const [viewMode, setViewMode] = React.useState<ViewMode>("kanban")
   const [sidebarFilter, setSidebarFilter] = React.useState<SidebarFilter>("all")
   const [query, setQuery] = React.useState("")
   const [isLoading, setIsLoading] = React.useState(false)
@@ -219,14 +225,6 @@ export function AgentKanbanApp() {
     }
   }
 
-  const selectableGroupOptions = React.useMemo(
-    () => getSelectableGroupOptions(agents),
-    [agents]
-  )
-  const selectedGroupBy = isSelectableGroupBy(groupBy, selectableGroupOptions)
-    ? groupBy
-    : defaultGroupBy
-
   if (status === "checking") {
     return <LoadingScreen />
   }
@@ -237,14 +235,13 @@ export function AgentKanbanApp() {
 
   const searchedAgents = searchAgents(agents, query)
   const visibleAgents = filterAgentsBySidebar(searchedAgents, sidebarFilter)
-  const showBoardLoading = isLoading && agents.length === 0 && visibleAgents.length === 0
+  const timelineGroups = groupAgentsByActivity(visibleAgents)
+  const kanbanGroups = groupAgentsByStatus(visibleAgents)
+  const showInitialLoading = isLoading && agents.length === 0 && visibleAgents.length === 0
   const sidebarItems = sidebarFilters.map((item) => ({
     ...item,
     count: filterAgentsBySidebar(searchedAgents, item.id).length,
   }))
-  const selectedGroupOption = groupOptions.find((option) => option.id === selectedGroupBy)
-  const SelectedGroupIcon = selectedGroupOption?.icon
-  const groups = groupAgents(visibleAgents, selectedGroupBy)
   const signedInName = session.user?.name ?? "Cursor user"
   const signedInLabel = session.user?.email
     ? `${signedInName} (${session.user.email})`
@@ -278,10 +275,10 @@ export function AgentKanbanApp() {
           ) : (
             <>
               <div className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <KanbanIcon aria-hidden="true" className="size-4" />
+                <ClockIcon aria-hidden="true" className="size-4" />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold">Agent Kanban</div>
+                <div className="truncate text-sm font-semibold">Agent Views</div>
                 <div className="truncate text-xs text-muted-foreground">
                   Cursor Cloud Agents
                 </div>
@@ -371,43 +368,7 @@ export function AgentKanbanApp() {
             />
           </div>
 
-          <Select
-            items={selectableGroupOptions.map((option) => ({
-              label: groupOptionLabel(option),
-              value: option.id,
-            }))}
-            value={selectedGroupBy}
-            onValueChange={(value) => {
-              if (isSelectableGroupBy(value, selectableGroupOptions)) {
-                setGroupBy(value)
-              } else {
-                setGroupBy(defaultGroupBy)
-              }
-            }}
-          >
-            <SelectTrigger aria-label="Group agents" size="sm">
-              {SelectedGroupIcon ? (
-                <SelectedGroupIcon
-                  aria-hidden="true"
-                  className="text-muted-foreground"
-                />
-              ) : null}
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent align="end">
-              <SelectGroup>
-                {selectableGroupOptions.map((option) => (
-                  <SelectItem
-                    key={option.id}
-                    value={option.id}
-                    disabled={!option.selectable}
-                  >
-                    <GroupOptionContent option={option} />
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+          <ViewModeToggle value={viewMode} onChange={setViewMode} />
 
           <div className="hidden shrink-0 items-center gap-2 text-xs text-muted-foreground xl:flex">
             <span>{visibleAgents.length} shown</span>
@@ -443,20 +404,37 @@ export function AgentKanbanApp() {
 
         <section className="flex min-h-0 flex-1 flex-col">
           <ScrollArea className="min-h-0 flex-1">
-            <div className="flex min-h-full gap-3 p-4">
-              {groups.length > 0 ? (
-                groups.map((group) => (
-                  <BoardColumn
-                    key={group.id}
-                    title={group.title}
-                    icon={selectedGroupOption?.icon ?? CirclesFourIcon}
-                    agents={group.agents}
+            <div
+              className={cn(
+                "flex min-h-full w-full flex-col gap-4 p-4",
+                viewMode === "timeline" && "mx-auto max-w-5xl"
+              )}
+            >
+              {visibleAgents.length > 0 ? (
+                viewMode === "timeline" ? (
+                  <>
+                    <TimelineHeader agentCount={visibleAgents.length} isLoading={isLoading} />
+                    <div className="flex flex-col gap-6">
+                      {timelineGroups.map((group) => (
+                        <TimelineSection
+                          key={group.id}
+                          title={group.title}
+                          agents={group.agents}
+                        />
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <KanbanBoard
+                    groups={kanbanGroups}
+                    agentCount={visibleAgents.length}
+                    isLoading={isLoading}
                   />
-                ))
-              ) : showBoardLoading ? (
-                <BoardLoadingSkeleton />
+                )
+              ) : showInitialLoading ? (
+                viewMode === "timeline" ? <TimelineLoadingSkeleton /> : <BoardLoadingSkeleton />
               ) : (
-                <EmptyBoard onCreate={() => setIsCreateOpen(true)} />
+                <EmptyAgents viewMode={viewMode} onCreate={() => setIsCreateOpen(true)} />
               )}
             </div>
           </ScrollArea>
@@ -481,7 +459,7 @@ function LoadingScreen() {
     <div className="flex min-h-screen items-center justify-center bg-background">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Loading Agent Kanban</CardTitle>
+          <CardTitle>Loading Agent Views</CardTitle>
           <CardDescription>Checking for a saved Cursor API key.</CardDescription>
         </CardHeader>
       </Card>
@@ -577,20 +555,107 @@ function OnboardingScreen({
   )
 }
 
+function ViewModeToggle({
+  value,
+  onChange,
+}: {
+  value: ViewMode
+  onChange: (value: ViewMode) => void
+}) {
+  return (
+    <div
+      className="flex shrink-0 rounded-lg border bg-muted/40 p-0.5"
+      aria-label="Switch agent view"
+    >
+      <button
+        type="button"
+        aria-pressed={value === "kanban"}
+        onClick={() => onChange("kanban")}
+        className={cn(
+          "inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+          value === "kanban" && "bg-background text-foreground shadow-sm"
+        )}
+      >
+        <KanbanIcon aria-hidden="true" className="size-3.5" />
+        <span className="hidden sm:inline">Kanban</span>
+      </button>
+      <button
+        type="button"
+        aria-pressed={value === "timeline"}
+        onClick={() => onChange("timeline")}
+        className={cn(
+          "inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+          value === "timeline" && "bg-background text-foreground shadow-sm"
+        )}
+      >
+        <ClockIcon aria-hidden="true" className="size-3.5" />
+        <span className="hidden sm:inline">Timeline</span>
+      </button>
+    </div>
+  )
+}
+
+function KanbanBoard({
+  groups,
+  agentCount,
+  isLoading,
+}: {
+  groups: ReturnType<typeof groupAgentsByStatus>
+  agentCount: number
+  isLoading: boolean
+}) {
+  return (
+    <>
+      <BoardHeader agentCount={agentCount} isLoading={isLoading} />
+      <div className="flex min-h-full gap-3">
+        {groups.map((group) => (
+          <BoardColumn key={group.id} title={group.title} agents={group.agents} />
+        ))}
+      </div>
+    </>
+  )
+}
+
+function BoardHeader({
+  agentCount,
+  isLoading,
+}: {
+  agentCount: number
+  isLoading: boolean
+}) {
+  return (
+    <Card className="bg-card/70">
+      <CardHeader className="flex-row items-start justify-between gap-4">
+        <div className="min-w-0">
+          <CardTitle>Cloud agent board</CardTitle>
+          <CardDescription>
+            A Kanban view of Cursor Cloud Agents grouped by lifecycle status.
+          </CardDescription>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Badge variant="secondary">{agentCount} shown</Badge>
+          {isLoading ? <Badge variant="outline">Syncing</Badge> : null}
+        </div>
+      </CardHeader>
+    </Card>
+  )
+}
+
 function BoardColumn({
   title,
-  icon: Icon,
   agents,
 }: {
   title: string
-  icon: IconComponent
   agents: AgentCard[]
 }) {
   return (
     <section className="flex w-80 shrink-0 flex-col rounded-xl bg-muted/20">
       <header className="flex items-center justify-between px-3 py-2">
-        <div className="flex items-center gap-2">
-          <Icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+        <div className="flex min-w-0 items-center gap-2">
+          <CirclesFourIcon
+            aria-hidden="true"
+            className="size-3.5 shrink-0 text-muted-foreground"
+          />
           <h2 className="truncate text-sm font-medium">{title}</h2>
         </div>
         <Badge variant="secondary">{agents.length}</Badge>
@@ -714,14 +779,249 @@ function BoardLoadingSkeleton() {
   )
 }
 
-function GroupOptionContent({ option }: { option: SelectableGroupOption }) {
-  const Icon = option.icon
+function TimelineHeader({
+  agentCount,
+  isLoading,
+}: {
+  agentCount: number
+  isLoading: boolean
+}) {
+  return (
+    <Card className="bg-card/70">
+      <CardHeader className="flex-row items-start justify-between gap-4">
+        <div className="min-w-0">
+          <CardTitle>Cloud agent activity</CardTitle>
+          <CardDescription>
+            A chronological feed of Cursor Cloud Agent status, artifacts, branches, and PRs.
+          </CardDescription>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Badge variant="secondary">{agentCount} shown</Badge>
+          {isLoading ? <Badge variant="outline">Syncing</Badge> : null}
+        </div>
+      </CardHeader>
+    </Card>
+  )
+}
+
+function TimelineSection({
+  title,
+  agents,
+}: {
+  title: string
+  agents: AgentCard[]
+}) {
+  return (
+    <section className="flex flex-col gap-3">
+      <header className="flex items-center gap-2">
+        <div className="flex size-7 items-center justify-center rounded-full border bg-background text-muted-foreground">
+          <ClockIcon aria-hidden="true" className="size-3.5" />
+        </div>
+        <h2 className="text-sm font-semibold">{title}</h2>
+        <Badge variant="outline">{agents.length}</Badge>
+      </header>
+      <div className="relative ml-3 flex flex-col gap-3 before:absolute before:bottom-4 before:left-3 before:top-0 before:w-px before:bg-border">
+        {agents.map((agent) => (
+          <TimelineActivityItem key={agent.id} agent={agent} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function TimelineLoadingSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label="Loading cloud agents"
+      className="flex min-h-[60vh] flex-1 flex-col gap-6"
+    >
+      <span className="sr-only">Loading cloud agents</span>
+      <Card className="bg-card/70">
+        <CardHeader className="gap-2">
+          <div
+            className="h-4 w-48 animate-pulse rounded-full bg-muted"
+            aria-hidden="true"
+          />
+          <div
+            className="h-3 w-96 max-w-full animate-pulse rounded-full bg-muted/70"
+            aria-hidden="true"
+          />
+        </CardHeader>
+      </Card>
+      {timelineLoadingSections.map((section) => (
+        <section key={section.id} className="flex flex-col gap-3">
+          <header className="flex items-center gap-2">
+            <div
+              className="size-7 animate-pulse rounded-full border bg-muted"
+              aria-hidden="true"
+            />
+            <div
+              className="h-3 w-20 animate-pulse rounded-full bg-muted"
+              aria-hidden="true"
+            />
+            <div
+              className="h-5 w-8 animate-pulse rounded-full bg-muted/70"
+              aria-hidden="true"
+            />
+          </header>
+          <div className="relative ml-3 flex flex-col gap-3 before:absolute before:bottom-4 before:left-3 before:top-0 before:w-px before:bg-border">
+            {Array.from({ length: section.cards }).map((_, cardIndex) => {
+                const [titleWidth, metaWidth] =
+                  loadingCardLineWidths[cardIndex % loadingCardLineWidths.length]
+
+                return (
+                  <div key={`${section.id}-${cardIndex}`} className="relative flex gap-4">
+                    <div
+                      className="relative z-10 mt-5 size-6 shrink-0 rounded-full border-4 border-background bg-muted"
+                      aria-hidden="true"
+                    />
+                    <Card size="sm" className="flex-1 gap-3 bg-card/70 ring-border/60">
+                      <CardHeader className="gap-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 flex-1 flex-col gap-2">
+                            <div
+                              className={cn(
+                                "h-3 animate-pulse rounded-full bg-muted",
+                                titleWidth
+                              )}
+                              aria-hidden="true"
+                            />
+                            <div
+                              className="h-3 w-7/12 animate-pulse rounded-full bg-muted/70"
+                              aria-hidden="true"
+                            />
+                          </div>
+                          <div
+                            className="h-5 w-16 animate-pulse rounded-full bg-muted/80"
+                            aria-hidden="true"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="size-3.5 animate-pulse rounded-full bg-muted"
+                            aria-hidden="true"
+                          />
+                          <div
+                            className={cn(
+                              "h-2.5 animate-pulse rounded-full bg-muted",
+                              metaWidth
+                            )}
+                            aria-hidden="true"
+                          />
+                        </div>
+                      </CardHeader>
+                      {cardIndex === 0 ? (
+                        <CardContent className="flex flex-col gap-2">
+                          <div
+                            className="h-2.5 w-full animate-pulse rounded-full bg-muted/70"
+                            aria-hidden="true"
+                          />
+                          <div
+                            className="h-2.5 w-9/12 animate-pulse rounded-full bg-muted/60"
+                            aria-hidden="true"
+                          />
+                        </CardContent>
+                      ) : null}
+                      <CardFooter className="flex-wrap justify-between gap-2 border-t-0 bg-transparent">
+                        <div
+                          className="h-2.5 w-12 animate-pulse rounded-full bg-muted"
+                          aria-hidden="true"
+                        />
+                        <div
+                          className="h-2.5 w-8 animate-pulse rounded-full bg-muted/70"
+                          aria-hidden="true"
+                        />
+                      </CardFooter>
+                    </Card>
+                  </div>
+                )
+              })}
+          </div>
+        </section>
+      ))}
+    </div>
+  )
+}
+
+function TimelineActivityItem({ agent }: { agent: AgentCard }) {
+  const previewArtifact = getPreviewArtifact(agent.artifacts)
+  const hasCardContent = Boolean(agent.latestMessage || previewArtifact)
+  const activityTime = agent.updatedAt ?? agent.createdAt
 
   return (
-    <span className="flex min-w-0 items-center gap-2">
-      <Icon aria-hidden="true" className="shrink-0 text-muted-foreground" />
-      <span className="truncate">{groupOptionLabel(option)}</span>
-    </span>
+    <article className="relative flex gap-4">
+      <div className="relative z-10 mt-5 flex size-6 shrink-0 items-center justify-center rounded-full border-4 border-background bg-primary text-primary-foreground">
+        <ClockIcon aria-hidden="true" className="size-3" />
+      </div>
+      <Card
+        size="sm"
+        className="flex-1 gap-3 bg-card/70 ring-border/60 transition-colors hover:bg-card/90"
+      >
+        <CardHeader className="gap-2">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <CardTitle className="line-clamp-2">{agent.title}</CardTitle>
+              <CardDescription className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <ClockIcon aria-hidden="true" className="size-3.5 shrink-0" />
+                  <span>{formatRelativeTime(activityTime)}</span>
+                </span>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <KanbanIcon aria-hidden="true" className="size-3.5 shrink-0" />
+                  <span className="truncate">{agent.repository}</span>
+                </span>
+                {agent.branch ? (
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0" />
+                    <span className="truncate">{agent.branch}</span>
+                  </span>
+                ) : null}
+                {agent.createdBy ? <span>by {agent.createdBy}</span> : null}
+              </CardDescription>
+            </div>
+            <StatusBadge status={agent.status} />
+          </div>
+        </CardHeader>
+        {hasCardContent ? (
+          <CardContent className="flex flex-col gap-3">
+            {agent.latestMessage ? (
+              <p className="line-clamp-3 text-sm text-muted-foreground">
+                {agent.latestMessage}
+              </p>
+            ) : null}
+            {previewArtifact ? <ArtifactTile artifact={previewArtifact} /> : null}
+          </CardContent>
+        ) : null}
+        <CardFooter className="flex-wrap justify-between gap-2 border-t-0 bg-transparent text-xs text-muted-foreground">
+          <span>{formatAbsoluteTime(activityTime)}</span>
+          <div className="flex items-center gap-3">
+            {agent.durationMs ? <span>{formatDuration(agent.durationMs)}</span> : null}
+            {agent.prUrl ? (
+              <a
+                href={agent.prUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-foreground underline-offset-4 hover:underline"
+              >
+                PR
+              </a>
+            ) : null}
+            {agent.repositoryUrl ? (
+              <a
+                href={agent.repositoryUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-foreground underline-offset-4 hover:underline"
+              >
+                Repo
+              </a>
+            ) : null}
+          </div>
+        </CardFooter>
+      </Card>
+    </article>
   )
 }
 
@@ -739,9 +1039,17 @@ function AgentCardPreview({ agent }: { agent: AgentCard }) {
           <CardTitle className="line-clamp-2">{agent.title}</CardTitle>
           <StatusBadge status={agent.status} />
         </div>
-        <CardDescription className="flex items-center gap-1.5 truncate text-xs">
-          <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0" />
-          <span className="truncate">{agent.repository}</span>
+        <CardDescription className="flex flex-col gap-1 text-xs">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <KanbanIcon aria-hidden="true" className="size-3.5 shrink-0" />
+            <span className="truncate">{agent.repository}</span>
+          </span>
+          {agent.branch ? (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0" />
+              <span className="truncate">{agent.branch}</span>
+            </span>
+          ) : null}
         </CardDescription>
       </CardHeader>
       {hasCardContent ? (
@@ -755,7 +1063,8 @@ function AgentCardPreview({ agent }: { agent: AgentCard }) {
         </CardContent>
       ) : null}
       <CardFooter className="flex-wrap justify-between gap-2 border-t-0 bg-transparent text-xs text-muted-foreground">
-        <span>{formatRelativeTime(agent.updatedAt ?? agent.createdAt)}</span>
+        <span>{formatRelativeTime(getActivityTime(agent))}</span>
+        {agent.durationMs ? <span>{formatDuration(agent.durationMs)}</span> : null}
         {agent.prUrl ? (
           <a
             href={agent.prUrl}
@@ -1083,14 +1392,22 @@ function SidebarItem({
   )
 }
 
-function EmptyBoard({ onCreate }: { onCreate: () => void }) {
+function EmptyAgents({
+  viewMode,
+  onCreate,
+}: {
+  viewMode: ViewMode
+  onCreate: () => void
+}) {
+  const surface = viewMode === "timeline" ? "timeline" : "board"
+
   return (
     <div className="flex min-h-[50vh] flex-1 items-center justify-center">
       <Card className="w-full max-w-md text-center">
         <CardHeader>
           <CardTitle>No agents found</CardTitle>
           <CardDescription>
-            Create a cloud agent or adjust your search to populate the board.
+            Create a cloud agent or adjust your search to populate the {surface}.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1118,45 +1435,74 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant={variant}>{formatStatusLabel(status)}</Badge>
 }
 
-function groupAgents(agents: AgentCard[], groupBy: GroupBy) {
+function groupAgentsByStatus(agents: AgentCard[]) {
+  const sortedAgents = [...agents].sort(
+    (left, right) => getActivityTimestamp(right) - getActivityTimestamp(left)
+  )
   const groups = new Map<string, AgentCard[]>()
 
-  for (const agent of agents) {
-    const title = groupTitle(agent, groupBy)
+  for (const agent of sortedAgents) {
+    const title = formatStatusLabel(agent.status)
     const group = groups.get(title) ?? []
     group.push(agent)
     groups.set(title, group)
   }
 
-  const entries = Array.from(groups.entries())
-  if (groupBy === "createdAt") {
-    entries.sort(
-      ([leftTitle], [rightTitle]) => dateBucketRank(leftTitle) - dateBucketRank(rightTitle)
+  return Array.from(groups.entries())
+    .sort(
+      ([leftTitle], [rightTitle]) =>
+        statusBucketRank(leftTitle) - statusBucketRank(rightTitle) ||
+        leftTitle.localeCompare(rightTitle)
     )
+    .map(([title, group]) => ({
+      id: `status-${title}`,
+      title,
+      agents: group,
+    }))
+}
+
+function groupAgentsByActivity(agents: AgentCard[]) {
+  const sortedAgents = [...agents].sort(
+    (left, right) => getActivityTimestamp(right) - getActivityTimestamp(left)
+  )
+  const groups = new Map<string, AgentCard[]>()
+
+  for (const agent of sortedAgents) {
+    const title = dateBucket(getActivityTime(agent))
+    const group = groups.get(title) ?? []
+    group.push(agent)
+    groups.set(title, group)
   }
 
-  return entries.map(([title, group]) => ({
-    id: `${groupBy}-${title}`,
-    title,
-    agents: group,
-  }))
+  return Array.from(groups.entries())
+    .sort(([leftTitle], [rightTitle]) => dateBucketRank(leftTitle) - dateBucketRank(rightTitle))
+    .map(([title, group]) => ({
+      id: `activity-${title}`,
+      title,
+      agents: group,
+    }))
+}
+
+function getActivityTime(agent: AgentCard) {
+  return agent.updatedAt ?? agent.createdAt
+}
+
+function getActivityTimestamp(agent: AgentCard) {
+  const value = getActivityTime(agent)
+  if (!value) {
+    return 0
+  }
+
+  const timestamp = new Date(value).getTime()
+  return Number.isNaN(timestamp) ? 0 : timestamp
 }
 
 function dateBucketRank(title: string) {
   return dateBucketOrder.get(title) ?? dateBucketOrder.size
 }
 
-function groupTitle(agent: AgentCard, groupBy: GroupBy) {
-  if (groupBy === "createdAt") {
-    return dateBucket(agent.createdAt)
-  }
-
-  const value = agent[groupBy]
-  if (groupBy === "status" && typeof value === "string" && value.trim()) {
-    return formatStatusLabel(value)
-  }
-
-  return typeof value === "string" && value.trim() ? value : "Unassigned"
+function statusBucketRank(title: string) {
+  return statusBucketOrder.get(title) ?? statusBucketOrder.size
 }
 
 function searchAgents(agents: AgentCard[], query: string) {
@@ -1246,40 +1592,6 @@ function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
 }
 
-function getSelectableGroupOptions(agents: AgentCard[]): SelectableGroupOption[] {
-  return groupOptions.map((option) => {
-    const requiredField = option.requiresData
-
-    return {
-      ...option,
-      selectable:
-        agents.length === 0 ||
-        !requiredField ||
-        agents.some((agent) => hasAgentValue(agent, requiredField)),
-    }
-  })
-}
-
-function hasAgentValue(agent: AgentCard, field: keyof AgentCard) {
-  const value = agent[field]
-  if (typeof value === "string") {
-    return Boolean(value.trim())
-  }
-
-  return value !== undefined && value !== null
-}
-
-function groupOptionLabel(option: SelectableGroupOption) {
-  return option.selectable ? option.label : `${option.label} (no data)`
-}
-
-function isSelectableGroupBy(
-  value: string | null,
-  options: SelectableGroupOption[]
-): value is GroupBy {
-  return options.some((option) => option.id === value && option.selectable)
-}
-
 function titleCase(value: string) {
   return value
     .replace(/[_-]/g, " ")
@@ -1347,4 +1659,35 @@ function formatRelativeTime(value: string | undefined) {
 
   const days = Math.floor(hours / 24)
   return `${days}d ago`
+}
+
+function formatAbsoluteTime(value: string | undefined) {
+  if (!value) {
+    return "No timestamp"
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return "No timestamp"
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date)
+}
+
+function formatDuration(durationMs: number) {
+  const seconds = Math.max(1, Math.round(durationMs / 1000))
+  if (seconds < 60) {
+    return `${seconds}s`
+  }
+
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) {
+    return `${minutes}m`
+  }
+
+  const hours = Math.round(minutes / 60)
+  return `${hours}h`
 }

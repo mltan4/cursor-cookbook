@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "Agent Kanban",
-  description: "A Linear-style board for Cursor Cloud Agents",
+  title: "Agent Views",
+  description: "Kanban and timeline views for Cursor Cloud Agents",
 }
 
 export default function RootLayout({

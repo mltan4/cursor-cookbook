@@ -1,6 +1,7 @@
 import type { NextConfig } from "next"
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["*.agent.cvm.dev"],
   experimental: {
     optimizePackageImports: ["@phosphor-icons/react"],
   },

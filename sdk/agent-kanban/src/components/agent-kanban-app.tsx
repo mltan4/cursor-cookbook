@@ -132,7 +132,7 @@ export function AgentKanbanApp() {
   const [agents, setAgents] = React.useState<AgentCard[]>([])
   const [repositories, setRepositories] = React.useState<RepositoryOption[]>([])
   const [models, setModels] = React.useState<ModelOption[]>([])
-  const [viewMode, setViewMode] = React.useState<ViewMode>("kanban")
+  const [viewMode, setViewMode] = React.useState<ViewMode>("timeline")
   const [sidebarFilter, setSidebarFilter] = React.useState<SidebarFilter>("all")
   const [query, setQuery] = React.useState("")
   const [isLoading, setIsLoading] = React.useState(false)

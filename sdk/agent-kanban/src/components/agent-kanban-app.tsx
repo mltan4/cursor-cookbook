@@ -51,7 +51,7 @@ import type {
 } from "@/lib/agents/types"
 import { cn } from "@/lib/utils"
 
-type GroupBy = "status" | "repository" | "createdAt"
+type GroupBy = "status" | "repository" | "branch" | "createdAt"
 type IconComponent = React.ElementType
 
 type GroupOption = {
@@ -80,8 +80,23 @@ const defaultGroupBy: GroupBy = "status"
 const groupOptions: GroupOption[] = [
   { id: "status", label: "Status", icon: CirclesFourIcon },
   { id: "repository", label: "Repository", icon: KanbanIcon },
+  { id: "branch", label: "Branch", icon: GitBranchIcon, requiresData: "branch" },
   { id: "createdAt", label: "Created date", icon: ClockIcon },
 ]
+
+const statusBucketOrder = new Map([
+  ["Running", 0],
+  ["Queued", 1],
+  ["Pending", 2],
+  ["Completed", 3],
+  ["Complete", 3],
+  ["Done", 3],
+  ["Failed", 4],
+  ["Error", 4],
+  ["Cancelled", 5],
+  ["Archived", 6],
+  ["No status", 7],
+])
 
 const dateBucketOrder = new Map([
   ["Today", 0],
@@ -739,9 +754,17 @@ function AgentCardPreview({ agent }: { agent: AgentCard }) {
           <CardTitle className="line-clamp-2">{agent.title}</CardTitle>
           <StatusBadge status={agent.status} />
         </div>
-        <CardDescription className="flex items-center gap-1.5 truncate text-xs">
-          <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0" />
-          <span className="truncate">{agent.repository}</span>
+        <CardDescription className="flex flex-col gap-1 text-xs">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <KanbanIcon aria-hidden="true" className="size-3.5 shrink-0" />
+            <span className="truncate">{agent.repository}</span>
+          </span>
+          {agent.branch ? (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0" />
+              <span className="truncate">{agent.branch}</span>
+            </span>
+          ) : null}
         </CardDescription>
       </CardHeader>
       {hasCardContent ? (
@@ -756,6 +779,7 @@ function AgentCardPreview({ agent }: { agent: AgentCard }) {
       ) : null}
       <CardFooter className="flex-wrap justify-between gap-2 border-t-0 bg-transparent text-xs text-muted-foreground">
         <span>{formatRelativeTime(agent.updatedAt ?? agent.createdAt)}</span>
+        {agent.durationMs ? <span>{formatDuration(agent.durationMs)}</span> : null}
         {agent.prUrl ? (
           <a
             href={agent.prUrl}
@@ -1129,10 +1153,18 @@ function groupAgents(agents: AgentCard[], groupBy: GroupBy) {
   }
 
   const entries = Array.from(groups.entries())
-  if (groupBy === "createdAt") {
+  if (groupBy === "status") {
+    entries.sort(
+      ([leftTitle], [rightTitle]) =>
+        statusBucketRank(leftTitle) - statusBucketRank(rightTitle) ||
+        leftTitle.localeCompare(rightTitle)
+    )
+  } else if (groupBy === "createdAt") {
     entries.sort(
       ([leftTitle], [rightTitle]) => dateBucketRank(leftTitle) - dateBucketRank(rightTitle)
     )
+  } else {
+    entries.sort(([leftTitle], [rightTitle]) => leftTitle.localeCompare(rightTitle))
   }
 
   return entries.map(([title, group]) => ({
@@ -1144,6 +1176,10 @@ function groupAgents(agents: AgentCard[], groupBy: GroupBy) {
 
 function dateBucketRank(title: string) {
   return dateBucketOrder.get(title) ?? dateBucketOrder.size
+}
+
+function statusBucketRank(title: string) {
+  return statusBucketOrder.get(title) ?? statusBucketOrder.size
 }
 
 function groupTitle(agent: AgentCard, groupBy: GroupBy) {
@@ -1347,4 +1383,19 @@ function formatRelativeTime(value: string | undefined) {
 
   const days = Math.floor(hours / 24)
   return `${days}d ago`
+}
+
+function formatDuration(durationMs: number) {
+  const seconds = Math.max(1, Math.round(durationMs / 1000))
+  if (seconds < 60) {
+    return `${seconds}s`
+  }
+
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) {
+    return `${minutes}m`
+  }
+
+  const hours = Math.round(minutes / 60)
+  return `${hours}h`
 }

@@ -19,7 +19,7 @@ type TextBlock = {
 }
 
 type ToolBlock = {
-  type: string
+  type: Exclude<string, "text">
   id?: string
   name?: string
   input?: unknown
@@ -196,7 +196,7 @@ function renderSdkEvent(event: SDKMessage) {
   switch (event.type) {
     case "assistant":
       for (const block of event.message.content as Array<TextBlock | ToolBlock>) {
-        if (block.type === "text") {
+        if (isTextBlock(block)) {
           process.stdout.write(block.text)
         } else {
           annotate(
@@ -228,6 +228,10 @@ function renderSdkEvent(event: SDKMessage) {
     default:
       break
   }
+}
+
+function isTextBlock(block: TextBlock | ToolBlock): block is TextBlock {
+  return block.type === "text"
 }
 
 function summarizeToolInput(input: unknown) {

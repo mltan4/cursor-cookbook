@@ -96,6 +96,10 @@ function parseArgs(argv: string[]): CliOptions {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
 
+    if (index === 0 && arg === "--" && argv.length > 1) {
+      continue
+    }
+
     if (arg === "--") {
       extraParts.push(...argv.slice(index + 1))
       break

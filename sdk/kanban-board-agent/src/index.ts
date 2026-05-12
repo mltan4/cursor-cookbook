@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { Agent, type SDKMessage } from "@cursor/sdk"
+import type { SDKMessage } from "@cursor/sdk"
 import { mkdir, readdir } from "node:fs/promises"
 import path from "node:path"
 import process from "node:process"
@@ -44,6 +44,7 @@ async function main() {
   const outputDir = path.resolve(options.outputDir)
   await prepareWorkspace(outputDir, options.force)
 
+  const { Agent } = await import("@cursor/sdk")
   const agent = await Agent.create({
     apiKey,
     name: "Kanban board builder",

@@ -99,15 +99,6 @@ const sidebarFilters: {
   { id: "recentlyActive", label: "Recently active", icon: ClockIcon },
 ]
 
-const viewModeOptions: {
-  id: ViewMode
-  label: string
-  icon: IconComponent
-}[] = [
-  { id: "kanban", label: "Kanban", icon: KanbanIcon },
-  { id: "timeline", label: "Timeline", icon: ClockIcon },
-]
-
 const boardLoadingColumns: {
   id: string
   title: string
@@ -141,7 +132,7 @@ export function AgentKanbanApp() {
   const [agents, setAgents] = React.useState<AgentCard[]>([])
   const [repositories, setRepositories] = React.useState<RepositoryOption[]>([])
   const [models, setModels] = React.useState<ModelOption[]>([])
-  const [viewMode, setViewMode] = React.useState<ViewMode>("timeline")
+  const [viewMode, setViewMode] = React.useState<ViewMode>("kanban")
   const [sidebarFilter, setSidebarFilter] = React.useState<SidebarFilter>("all")
   const [query, setQuery] = React.useState("")
   const [isLoading, setIsLoading] = React.useState(false)
@@ -377,7 +368,7 @@ export function AgentKanbanApp() {
             />
           </div>
 
-          <ViewModeFilter value={viewMode} onChange={setViewMode} />
+          <ViewModeToggle value={viewMode} onChange={setViewMode} />
 
           <div className="hidden shrink-0 items-center gap-2 text-xs text-muted-foreground xl:flex">
             <span>{visibleAgents.length} shown</span>
@@ -564,50 +555,43 @@ function OnboardingScreen({
   )
 }
 
-function ViewModeFilter({
+function ViewModeToggle({
   value,
   onChange,
 }: {
   value: ViewMode
   onChange: (value: ViewMode) => void
 }) {
-  const selectedOption = viewModeOptions.find((option) => option.id === value)
-  const SelectedIcon = selectedOption?.icon ?? ClockIcon
-
   return (
-    <Select
-      items={viewModeOptions.map((option) => ({
-        label: option.label,
-        value: option.id,
-      }))}
-      value={value}
-      onValueChange={(nextValue) => {
-        if (isViewMode(nextValue)) {
-          onChange(nextValue)
-        }
-      }}
+    <div
+      className="flex shrink-0 rounded-lg border bg-muted/40 p-0.5"
+      aria-label="Switch agent view"
     >
-      <SelectTrigger aria-label="Filter by view" size="sm">
-        <SelectedIcon aria-hidden="true" className="text-muted-foreground" />
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent align="end">
-        <SelectGroup>
-          {viewModeOptions.map((option) => {
-            const Icon = option.icon
-
-            return (
-              <SelectItem key={option.id} value={option.id}>
-                <span className="flex min-w-0 items-center gap-2">
-                  <Icon aria-hidden="true" className="shrink-0 text-muted-foreground" />
-                  <span className="truncate">{option.label}</span>
-                </span>
-              </SelectItem>
-            )
-          })}
-        </SelectGroup>
-      </SelectContent>
-    </Select>
+      <button
+        type="button"
+        aria-pressed={value === "kanban"}
+        onClick={() => onChange("kanban")}
+        className={cn(
+          "inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+          value === "kanban" && "bg-background text-foreground shadow-sm"
+        )}
+      >
+        <KanbanIcon aria-hidden="true" className="size-3.5" />
+        <span className="hidden sm:inline">Kanban</span>
+      </button>
+      <button
+        type="button"
+        aria-pressed={value === "timeline"}
+        onClick={() => onChange("timeline")}
+        className={cn(
+          "inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+          value === "timeline" && "bg-background text-foreground shadow-sm"
+        )}
+      >
+        <ClockIcon aria-hidden="true" className="size-3.5" />
+        <span className="hidden sm:inline">Timeline</span>
+      </button>
+    </div>
   )
 }
 
@@ -1519,10 +1503,6 @@ function dateBucketRank(title: string) {
 
 function statusBucketRank(title: string) {
   return statusBucketOrder.get(title) ?? statusBucketOrder.size
-}
-
-function isViewMode(value: string | null): value is ViewMode {
-  return viewModeOptions.some((option) => option.id === value)
 }
 
 function searchAgents(agents: AgentCard[], query: string) {
